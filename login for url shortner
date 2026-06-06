@@ -1,0 +1,449 @@
+import { useState, useEffect } from "react";
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+function generateKey(len = 6) {
+  return Array.from({ length: len }, () => BASE62[Math.floor(Math.random() * 62)]).join("");
+}
+function fmtDate(ts) {
+  return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+function isValidUrl(s) {
+  try { new URL(s); return true; } catch { return false; }
+}
+
+// ── mock "DB" stored in module state ─────────────────────────────────────────
+const USERS = { alice: "password", bob: "1234" };
+let DB = [
+  { id: 1, userId: "alice", key: "GhT7xQ", longUrl: "https://www.example.com/very/long/path/to/a/resource", clicks: 42, createdAt: Date.now() - 8.64e7 * 5 },
+  { id: 2, userId: "alice", key: "K9pLmN", longUrl: "https://github.com/anthropics/anthropic-sdk-python", clicks: 17, createdAt: Date.now() - 8.64e7 * 2 },
+];
+let nextId = 3;
+
+// ── colour tokens ─────────────────────────────────────────────────────────────
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #13131a;
+    --surface2: #1c1c28;
+    --border: #2a2a3d;
+    --accent: #7b61ff;
+    --accent2: #ff6b6b;
+    --accent3: #00e5bf;
+    --text: #f0f0ff;
+    --muted: #7070a0;
+    --radius: 12px;
+  }
+
+  body { background: var(--bg); color: var(--text); font-family: 'Syne', sans-serif; }
+
+  .mono { font-family: 'DM Mono', monospace; }
+
+  /* ── layout ── */
+  .app { min-height: 100vh; display: flex; flex-direction: column; }
+
+  /* ── nav ── */
+  .nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 32px; border-bottom: 1px solid var(--border);
+    background: rgba(10,10,15,.85); backdrop-filter: blur(12px);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo { font-size: 1.4rem; font-weight: 800; letter-spacing: -.5px; }
+  .logo span { color: var(--accent); }
+  .nav-right { display: flex; gap: 12px; align-items: center; }
+  .chip {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 6px 14px; font-size: .8rem;
+    color: var(--muted); font-family: 'DM Mono', monospace;
+  }
+
+  /* ── buttons ── */
+  .btn {
+    cursor: pointer; border: none; border-radius: var(--radius);
+    font-family: 'Syne', sans-serif; font-weight: 600; font-size: .85rem;
+    transition: all .15s; display: inline-flex; align-items: center; gap: 7px;
+  }
+  .btn-primary { background: var(--accent); color: #fff; padding: 10px 20px; }
+  .btn-primary:hover { background: #9480ff; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(123,97,255,.35); }
+  .btn-ghost { background: transparent; color: var(--muted); padding: 8px 16px; border: 1px solid var(--border); }
+  .btn-ghost:hover { color: var(--text); border-color: var(--accent); }
+  .btn-danger { background: transparent; color: var(--accent2); padding: 6px 12px; border: 1px solid rgba(255,107,107,.3); font-size: .78rem; }
+  .btn-danger:hover { background: rgba(255,107,107,.1); }
+  .btn-sm { padding: 6px 12px; font-size: .78rem; }
+
+  /* ── auth page ── */
+  .auth-wrap {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    padding: 40px 16px;
+    background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(123,97,255,.12) 0%, transparent 70%);
+  }
+  .auth-card {
+    width: 100%; max-width: 420px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 20px; padding: 40px;
+  }
+  .auth-title { font-size: 1.9rem; font-weight: 800; margin-bottom: 6px; }
+  .auth-sub { color: var(--muted); font-size: .9rem; margin-bottom: 28px; }
+  .tabs { display: flex; gap: 4px; background: var(--surface2); border-radius: 10px; padding: 4px; margin-bottom: 28px; }
+  .tab { flex: 1; text-align: center; padding: 8px; border-radius: 7px; cursor: pointer; font-size: .85rem; color: var(--muted); transition: all .15s; }
+  .tab.active { background: var(--accent); color: #fff; }
+
+  /* ── form ── */
+  .field { margin-bottom: 16px; }
+  .label { display: block; font-size: .78rem; color: var(--muted); margin-bottom: 6px; letter-spacing: .5px; text-transform: uppercase; }
+  .input {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 11px 14px; color: var(--text);
+    font-family: 'Syne', sans-serif; font-size: .9rem; outline: none; transition: border .15s;
+  }
+  .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(123,97,255,.15); }
+  .input.mono { font-family: 'DM Mono', monospace; }
+  .error-msg { color: var(--accent2); font-size: .8rem; margin-top: 10px; }
+
+  /* ── dashboard ── */
+  .dashboard { flex: 1; padding: 40px 32px; max-width: 1100px; margin: 0 auto; width: 100%; }
+  .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 36px; }
+  .page-title { font-size: 2rem; font-weight: 800; }
+  .page-sub { color: var(--muted); font-size: .9rem; margin-top: 4px; }
+
+  /* stats row */
+  .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 36px; }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 22px 24px;
+  }
+  .stat-label { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+  .stat-val { font-size: 2rem; font-weight: 800; }
+  .stat-val.purple { color: var(--accent); }
+  .stat-val.teal { color: var(--accent3); }
+  .stat-val.red { color: var(--accent2); }
+
+  /* create form */
+  .create-panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 28px; margin-bottom: 32px;
+  }
+  .create-title { font-size: 1rem; font-weight: 700; margin-bottom: 18px; }
+  .create-row { display: flex; gap: 12px; }
+  .create-row .input { flex: 1; }
+
+  /* url table */
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .table-head {
+    display: grid; grid-template-columns: 130px 1fr 90px 100px 100px;
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+    font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .5px;
+  }
+  .url-row {
+    display: grid; grid-template-columns: 130px 1fr 90px 100px 100px;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    align-items: center; transition: background .12s;
+  }
+  .url-row:last-child { border-bottom: none; }
+  .url-row:hover { background: var(--surface2); }
+  .short-key {
+    font-family: 'DM Mono', monospace; font-size: .85rem;
+    color: var(--accent3); font-weight: 500;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .long-url { font-size: .82rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .click-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-family: 'DM Mono', monospace; font-size: .82rem;
+    color: var(--accent);
+  }
+  .date-text { font-size: .78rem; color: var(--muted); }
+  .actions { display: flex; gap: 6px; }
+
+  /* copy toast */
+  .toast {
+    position: fixed; bottom: 28px; right: 28px;
+    background: var(--accent3); color: #000; padding: 10px 20px;
+    border-radius: 999px; font-weight: 700; font-size: .85rem;
+    animation: slideUp .3s ease; z-index: 999;
+  }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* modal */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.65); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center; z-index: 200;
+  }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 32px; width: 100%; max-width: 460px;
+  }
+  .modal-title { font-size: 1.2rem; font-weight: 700; margin-bottom: 20px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+
+  /* empty */
+  .empty { padding: 60px 20px; text-align: center; color: var(--muted); }
+  .empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
+
+  @media (max-width: 700px) {
+    .dashboard { padding: 24px 16px; }
+    .stats-row { grid-template-columns: 1fr 1fr; }
+    .table-head, .url-row { grid-template-columns: 110px 1fr 80px; }
+    .table-head > *:nth-child(4), .url-row > *:nth-child(4),
+    .table-head > *:nth-child(5), .url-row > *:nth-child(5) { display: none; }
+    .create-row { flex-direction: column; }
+    .nav { padding: 14px 16px; }
+  }
+`;
+
+// ── App ───────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [urls, setUrls] = useState(DB);
+
+  function showToast(msg) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2200);
+  }
+
+  return (
+    <>
+      <style>{css}</style>
+      <div className="app">
+        <Nav user={user} onLogout={() => setUser(null)} />
+        {!user
+          ? <AuthPage onAuth={setUser} />
+          : <Dashboard user={user} urls={urls} setUrls={setUrls} showToast={showToast} />
+        }
+      </div>
+      {toast && <div className="toast">✓ {toast}</div>}
+    </>
+  );
+}
+
+// ── Nav ───────────────────────────────────────────────────────────────────────
+function Nav({ user, onLogout }) {
+  return (
+    <nav className="nav">
+      <div className="logo">snip<span>.</span>ly</div>
+      {user && (
+        <div className="nav-right">
+          <span className="chip">{user}</span>
+          <button className="btn btn-ghost btn-sm" onClick={onLogout}>Log out</button>
+        </div>
+      )}
+    </nav>
+  );
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function AuthPage({ onAuth }) {
+  const [tab, setTab] = useState("login");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState("");
+
+  function handleSubmit() {
+    setErr("");
+    if (!username.trim() || !password.trim()) { setErr("All fields are required."); return; }
+    if (tab === "login") {
+      if (USERS[username] === password) { onAuth(username); }
+      else setErr("Invalid username or password.");
+    } else {
+      if (USERS[username]) { setErr("Username already taken."); return; }
+      USERS[username] = password;
+      onAuth(username);
+    }
+  }
+
+  return (
+    <div className="auth-wrap">
+      <div className="auth-card">
+        <div className="auth-title">Welcome back</div>
+        <div className="auth-sub">Short URLs, big impact.</div>
+        <div className="tabs">
+          <div className={`tab${tab === "login" ? " active" : ""}`} onClick={() => setTab("login")}>Log in</div>
+          <div className={`tab${tab === "register" ? " active" : ""}`} onClick={() => setTab("register")}>Register</div>
+        </div>
+        <div className="field">
+          <label className="label">Username</label>
+          <input className="input mono" value={username} onChange={e => setUsername(e.target.value)}
+            placeholder="alice" onKeyDown={e => e.key === "Enter" && handleSubmit()} />
+        </div>
+        <div className="field">
+          <label className="label">Password</label>
+          <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)}
+            placeholder="••••••••" onKeyDown={e => e.key === "Enter" && handleSubmit()} />
+        </div>
+        {err && <div className="error-msg">{err}</div>}
+        <button className="btn btn-primary" style={{ width: "100%", marginTop: 20, justifyContent: "center" }}
+          onClick={handleSubmit}>
+          {tab === "login" ? "Log in →" : "Create account →"}
+        </button>
+        <div style={{ marginTop: 16, fontSize: ".78rem", color: "var(--muted)", textAlign: "center" }}>
+          Demo: alice / password
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+function Dashboard({ user, urls, setUrls, showToast }) {
+  const [longUrl, setLongUrl] = useState("");
+  const [createErr, setCreateErr] = useState("");
+  const [editTarget, setEditTarget] = useState(null);
+
+  const myUrls = urls.filter(u => u.userId === user);
+  const totalClicks = myUrls.reduce((s, u) => s + u.clicks, 0);
+
+  function handleCreate() {
+    setCreateErr("");
+    if (!longUrl.trim()) { setCreateErr("Please enter a URL."); return; }
+    if (!isValidUrl(longUrl.trim())) { setCreateErr("Enter a valid URL (include https://)."); return; }
+    const entry = { id: nextId++, userId: user, key: generateKey(), longUrl: longUrl.trim(), clicks: 0, createdAt: Date.now() };
+    const next = [entry, ...urls];
+    DB = next; setUrls(next); setLongUrl("");
+    showToast("Short URL created!");
+  }
+
+  function handleDelete(id) {
+    const next = urls.filter(u => u.id !== id);
+    DB = next; setUrls(next);
+    showToast("Deleted.");
+  }
+
+  function handleEdit(updated) {
+    const next = urls.map(u => u.id === updated.id ? updated : u);
+    DB = next; setUrls(next); setEditTarget(null);
+    showToast("URL updated!");
+  }
+
+  function handleCopy(key) {
+    const short = `snip.ly/${key}`;
+    navigator.clipboard?.writeText(short).catch(() => {});
+    showToast(`Copied ${short}`);
+  }
+
+  function simulateClick(id) {
+    const next = urls.map(u => u.id === id ? { ...u, clicks: u.clicks + 1 } : u);
+    DB = next; setUrls(next);
+  }
+
+  return (
+    <div className="dashboard">
+      {/* header */}
+      <div className="page-header">
+        <div>
+          <div className="page-title">Your Links</div>
+          <div className="page-sub">Manage and track all your short URLs</div>
+        </div>
+      </div>
+
+      {/* stats */}
+      <div className="stats-row">
+        <div className="stat-card">
+          <div className="stat-label">Total Links</div>
+          <div className="stat-val purple">{myUrls.length}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Total Clicks</div>
+          <div className="stat-val teal">{totalClicks}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Avg Clicks</div>
+          <div className="stat-val red">{myUrls.length ? (totalClicks / myUrls.length).toFixed(1) : 0}</div>
+        </div>
+      </div>
+
+      {/* create */}
+      <div className="create-panel">
+        <div className="create-title">✦ Shorten a new URL</div>
+        <div className="create-row">
+          <input className="input" value={longUrl} onChange={e => setLongUrl(e.target.value)}
+            placeholder="https://your-very-long-url.com/goes/here"
+            onKeyDown={e => e.key === "Enter" && handleCreate()} />
+          <button className="btn btn-primary" onClick={handleCreate}>Shorten →</button>
+        </div>
+        {createErr && <div className="error-msg" style={{ marginTop: 8 }}>{createErr}</div>}
+      </div>
+
+      {/* table */}
+      {myUrls.length === 0 ? (
+        <div className="empty">
+          <div className="empty-icon">🔗</div>
+          <div>No short URLs yet — create your first one above!</div>
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <div className="table-head">
+            <span>Short URL</span>
+            <span>Destination</span>
+            <span>Clicks</span>
+            <span>Created</span>
+            <span>Actions</span>
+          </div>
+          {myUrls.map(url => (
+            <div className="url-row" key={url.id}>
+              <div className="short-key">
+                <span>snip.ly/{url.key}</span>
+                <button title="Copy" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: ".8rem" }}
+                  onClick={() => handleCopy(url.key)}>⎘</button>
+              </div>
+              <div className="long-url" title={url.longUrl}>{url.longUrl}</div>
+              <div>
+                <span className="click-badge" title="Simulate a click" onClick={() => simulateClick(url.id)} style={{ cursor: "pointer" }}>
+                  ↗ {url.clicks}
+                </span>
+              </div>
+              <div className="date-text">{fmtDate(url.createdAt)}</div>
+              <div className="actions">
+                <button className="btn btn-ghost btn-sm" onClick={() => setEditTarget(url)}>Edit</button>
+                <button className="btn btn-danger" onClick={() => handleDelete(url.id)}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {editTarget && (
+        <EditModal url={editTarget} onSave={handleEdit} onClose={() => setEditTarget(null)} />
+      )}
+    </div>
+  );
+}
+
+// ── EditModal ─────────────────────────────────────────────────────────────────
+function EditModal({ url, onSave, onClose }) {
+  const [longUrl, setLongUrl] = useState(url.longUrl);
+  const [key, setKey] = useState(url.key);
+  const [err, setErr] = useState("");
+
+  function handleSave() {
+    setErr("");
+    if (!isValidUrl(longUrl.trim())) { setErr("Enter a valid URL."); return; }
+    if (!key.trim()) { setErr("Short key cannot be empty."); return; }
+    onSave({ ...url, longUrl: longUrl.trim(), key: key.trim() });
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-title">Edit Short URL</div>
+        <div className="field">
+          <label className="label">Short Key</label>
+          <input className="input mono" value={key} onChange={e => setKey(e.target.value)} />
+        </div>
+        <div className="field">
+          <label className="label">Destination URL</label>
+          <input className="input" value={longUrl} onChange={e => setLongUrl(e.target.value)} />
+        </div>
+        {err && <div className="error-msg">{err}</div>}
+        <div className="modal-actions">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave}>Save changes</button>
+        </div>
+      </div>
+    </div>
+  );
+}
