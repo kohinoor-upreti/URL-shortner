@@ -113,7 +113,7 @@ Request body:
 json{ "url": "https://example.com/very/long/path" }
 Response:
 json{
-  "short_url": "http://localhost:5000/aB3kX7z",
+  "short_url": " http://localhost:3000",
   "key": "aB3kX7z"
 }
 GET /api/check-key?key=myslug
