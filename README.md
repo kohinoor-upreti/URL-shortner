@@ -25,17 +25,14 @@ urlshortener/
     └── qr/                 # QR code output (if saved server-side)
 
  Quick Start
-1. Clone the repo
-bashgit clone https://github.com/your-username/urlshortener.git
-cd urlshortener
-2. Create a virtual environment
+1. Create a virtual environment
 bashpython -m venv venv
 source venv/bin/activate      # Windows: venv\Scripts\activate
 3. Install dependencies
 bashpip install flask werkzeug
 4. Run the app
 bashpython app.py
-The app will be available at http://localhost:5000
+The app will be available.
 The SQLite database is created automatically on first run.
 
 Configuration
@@ -111,11 +108,6 @@ POST /api/shorten
 Shorten a URL (requires login session).
 Request body:
 json{ "url": "https://example.com/very/long/path" }
-Response:
-json{
-  "short_url": " http://localhost:3000",
-  "key": "aB3kX7z"
-}
 GET /api/check-key?key=myslug
 Check if a custom slug is available.
 Response:
